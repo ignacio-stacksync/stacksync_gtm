@@ -3,13 +3,31 @@ import json
 import os
 import re
 import uuid
+import io
 from datetime import datetime
 import httpx
 from supabase import create_client
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
 SUPABASE_URL = f"https://{os.environ.get('SUPABASE_PROJECT_ID', 'nlrfqkoaclpsbttzuqdv')}.supabase.co"
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
-BUCKET_NAME = 'circleback-meeting-recording'
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '1C6fXJonJdlvD4al5NzaHFD-uejWzwWo9')
+
+
+def get_drive_service():
+    """Create Google Drive service using service account credentials."""
+    creds_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
+    if not creds_json:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set")
+
+    creds_dict = json.loads(creds_json)
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=['https://www.googleapis.com/auth/drive.file']
+    )
+    return build('drive', 'v3', credentials=credentials)
 
 
 def sanitize_filename(name: str) -> str:
@@ -25,6 +43,36 @@ def generate_filename(meeting_name: str) -> str:
     short_uuid = str(uuid.uuid4())[:8]
     timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     return f"{sanitized}_{short_uuid}_{timestamp}.mp4"
+
+
+def upload_to_drive(video_data: bytes, filename: str) -> str:
+    """Upload video to Google Drive and return shareable link."""
+    service = get_drive_service()
+
+    file_metadata = {
+        'name': filename,
+        'parents': [GOOGLE_DRIVE_FOLDER_ID]
+    }
+
+    media = MediaIoBaseUpload(
+        io.BytesIO(video_data),
+        mimetype='video/mp4',
+        resumable=True
+    )
+
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id, webViewLink'
+    ).execute()
+
+    # Make file accessible via link
+    service.permissions().create(
+        fileId=file['id'],
+        body={'type': 'anyone', 'role': 'reader'}
+    ).execute()
+
+    return file.get('webViewLink', f"https://drive.google.com/file/d/{file['id']}/view")
 
 
 def process_job(supabase, job: dict) -> None:
@@ -46,19 +94,8 @@ def process_job(supabase, job: dict) -> None:
         # Generate filename
         filename = generate_filename(job['meeting_name'])
 
-        # Upload to Supabase Storage
-        supabase.storage.from_(BUCKET_NAME).upload(
-            path=filename,
-            file=video_data,
-            file_options={'content-type': 'video/mp4'}
-        )
-
-        # Generate signed URL (valid for 1 year)
-        signed_url_response = supabase.storage.from_(BUCKET_NAME).create_signed_url(
-            path=filename,
-            expires_in=31536000  # 1 year in seconds
-        )
-        result_url = signed_url_response['signedURL']
+        # Upload to Google Drive
+        result_url = upload_to_drive(video_data, filename)
 
         # Mark as completed
         supabase.table('video_transfer_jobs').update({
