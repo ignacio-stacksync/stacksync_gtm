@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST https://stacksync-ozs07bfvo-ignacios-projects-def37724.vercel.app/api/transfer -H \"Content-Type: application/json\" -d '{\"\"\"\"source_url\"\"\"\": \"\"\"\"https://storage.googleapis.com/saved-meeting-recording.prod.circleback.ai/meeting_5748765.mp4?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=circleback-ai%40appspot.gserviceaccount.com%2F20251231%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20251231T155849Z&X-Goog-Expires=86400&X-Goog-SignedHeaders=host&X-Goog-Signature=6d99f334adfa3486e1493dcc39ec91a66a657423558cab25875a0a262e44528d6cdd6b59c66f6119dce7591360c4ad97b48d0542047298a4c91e1752bdd432426561223c1f5841de62915a24c89eaab67fe12597f6628d5b13420d52516492fe983adcfe1cca2ec03b82c040705069e0dc11080ad4a048d16e1b96d4e27d4b4a7de633a8b1f5d4a41e818ff544ff746d5ab58bd8cfc3519c672c349c714f359a761080a5eb5f9a679a7c3eb57f832af78a153024f7e71afa8efe7929419aa16fa51139ea3454c501e9b837787460555025814e8033dca9a9593fff8d983993d7b33345f6a95037fa2f64fc98869c109aa1b50125d5c24bdcc1f80f01cde03cc3\"\"\"\", \"\"\"\"meeting_name\"\"\"\": \"\"\"\"Test Meeting Q4\"\"\"\"}')",
+      "Bash(python3:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)"
+    ]
+  }
+}
