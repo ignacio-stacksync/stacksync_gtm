@@ -1,10 +1,72 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
-from supabase import create_client
+import re
+import uuid
+import io
+from datetime import datetime
+import httpx
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
 
-SUPABASE_URL = f"https://{os.environ.get('SUPABASE_PROJECT_ID', 'nlrfqkoaclpsbttzuqdv')}.supabase.co"
-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '0ANj2wQrOweOKUk9PVA')
+
+
+def get_drive_service():
+    creds_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON', '')
+    if not creds_json:
+        raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set")
+
+    creds_dict = json.loads(creds_json)
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_dict,
+        scopes=['https://www.googleapis.com/auth/drive.file']
+    )
+    return build('drive', 'v3', credentials=credentials)
+
+
+def sanitize_filename(name: str) -> str:
+    name = re.sub(r'[^\w\s-]', '', name)
+    name = re.sub(r'\s+', '_', name)
+    return name.lower()
+
+
+def generate_filename(meeting_name: str) -> str:
+    sanitized = sanitize_filename(meeting_name)
+    short_uuid = str(uuid.uuid4())[:8]
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    return f"{sanitized}_{short_uuid}_{timestamp}.mp4"
+
+
+def upload_to_drive(video_data: bytes, filename: str) -> str:
+    service = get_drive_service()
+
+    file_metadata = {
+        'name': filename,
+        'parents': [GOOGLE_DRIVE_FOLDER_ID]
+    }
+
+    media = MediaIoBaseUpload(
+        io.BytesIO(video_data),
+        mimetype='video/mp4',
+        resumable=True
+    )
+
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id, webViewLink',
+        supportsAllDrives=True
+    ).execute()
+
+    service.permissions().create(
+        fileId=file['id'],
+        body={'type': 'anyone', 'role': 'reader'},
+        supportsAllDrives=True
+    ).execute()
+
+    return file.get('webViewLink', f"https://drive.google.com/file/d/{file['id']}/view")
 
 
 class handler(BaseHTTPRequestHandler):
@@ -24,21 +86,20 @@ class handler(BaseHTTPRequestHandler):
                 })
                 return
 
-            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+            # Download video from source
+            with httpx.Client(timeout=300.0) as client:
+                response = client.get(source_url)
+                response.raise_for_status()
+                video_data = response.content
 
-            result = supabase.table('video_transfer_jobs').insert({
-                'source_url': source_url,
-                'meeting_name': meeting_name,
-                'status': 'pending'
-            }).execute()
-
-            job = result.data[0]
+            # Generate filename and upload to Google Drive
+            filename = generate_filename(meeting_name)
+            result_url = upload_to_drive(video_data, filename)
 
             self._send_response(200, {
                 'success': True,
-                'job_id': job['id'],
-                'status': 'pending',
-                'message': 'Job queued. Poll /api/status?job_id=<job_id> for updates.'
+                'url': result_url,
+                'filename': filename
             })
 
         except json.JSONDecodeError:
