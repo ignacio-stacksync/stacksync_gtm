@@ -13,7 +13,7 @@ from googleapiclient.http import MediaIoBaseUpload
 
 SUPABASE_URL = f"https://{os.environ.get('SUPABASE_PROJECT_ID', 'nlrfqkoaclpsbttzuqdv')}.supabase.co"
 SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
-GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '1C6fXJonJdlvD4al5NzaHFD-uejWzwWo9')
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get('GOOGLE_DRIVE_FOLDER_ID', '0ANj2wQrOweOKUk9PVA')
 
 
 def get_drive_service():
@@ -63,13 +63,15 @@ def upload_to_drive(video_data: bytes, filename: str) -> str:
     file = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields='id, webViewLink'
+        fields='id, webViewLink',
+        supportsAllDrives=True
     ).execute()
 
-    # Make file accessible via link
+    # Make file accessible via link (for Shared Drives)
     service.permissions().create(
         fileId=file['id'],
-        body={'type': 'anyone', 'role': 'reader'}
+        body={'type': 'anyone', 'role': 'reader'},
+        supportsAllDrives=True
     ).execute()
 
     return file.get('webViewLink', f"https://drive.google.com/file/d/{file['id']}/view")
