@@ -1,0 +1,634 @@
+edges:
+  - edge_id: input-post_trigger
+    source:
+      handle_id: null
+      workflow_module_instance_id: post_trigger
+    target:
+      handle_id: null
+      workflow_module_instance_id: input
+  - edge_id: input-fetch_blog
+    source:
+      handle_id: null
+      workflow_module_instance_id: input
+    target:
+      handle_id: null
+      workflow_module_instance_id: fetch_and_parse_blog
+  - edge_id: fetch_blog-fact_check
+    source:
+      handle_id: null
+      workflow_module_instance_id: fetch_and_parse_blog
+    target:
+      handle_id: null
+      workflow_module_instance_id: perplexity_fact_check
+  - edge_id: fact_check-technical_depth
+    source:
+      handle_id: null
+      workflow_module_instance_id: perplexity_fact_check
+    target:
+      handle_id: null
+      workflow_module_instance_id: technical_depth_analyzer
+  - edge_id: technical_depth-writing_quality
+    source:
+      handle_id: null
+      workflow_module_instance_id: technical_depth_analyzer
+    target:
+      handle_id: null
+      workflow_module_instance_id: writing_quality_checker
+  - edge_id: writing_quality-persona_alignment
+    source:
+      handle_id: null
+      workflow_module_instance_id: writing_quality_checker
+    target:
+      handle_id: null
+      workflow_module_instance_id: persona_alignment_analyzer
+  - edge_id: persona_alignment-final_output
+    source:
+      handle_id: null
+      workflow_module_instance_id: persona_alignment_analyzer
+    target:
+      handle_id: null
+      workflow_module_instance_id: final_json_output
+modules:
+  # ============================================================
+  # STAGE 0: TRIGGER & INPUT
+  # ============================================================
+  - connections: []
+    description: null
+    error_handling_strategy: null
+    module_id: system-input-1
+    module_options: {}
+    name: Input
+    properties: {}
+    workflow_module_instance_id: input
+
+  - connections: []
+    description: null
+    error_handling_strategy: null
+    module_id: system-webhook_trigger-1
+    module_options:
+      enable_error_handling: false
+    name: POST Trigger
+    properties:
+      api_keys: []
+      body:
+        allow_extra_fields: true
+        data:
+          - key: blog_url
+            required: true
+            type: string
+      default_response: ""
+      headers:
+        allow_extra_fields: true
+        data: []
+      method: POST
+      query_parameters:
+        allow_extra_fields: true
+        data: []
+      request_type: sync
+    workflow_module_instance_id: post_trigger
+
+  # ============================================================
+  # STAGE 1: FETCH & PARSE BLOG CONTENT
+  # ============================================================
+  - connections:
+      - connection_app_type: openai
+        connection_management_type: managed
+        connection_resource_id: openai_connection
+    description: null
+    error_handling_strategy: null
+    module_id: stacksync_ai-ai_prompt-1
+    module_options:
+      enable_error_handling: false
+    name: Fetch and Parse Blog
+    properties:
+      connection:
+        connection_app_type: openai
+        connection_management_type: managed
+        connection_name: OpenAI connection
+      enable_deep_research: true
+      enable_extended_thinking: false
+      enforce_json_output: true
+      enforced_json_schema: |
+        {
+          "type": "object",
+          "required": ["url", "title", "content", "statistics", "claims"],
+          "properties": {
+            "url": { "type": "string" },
+            "title": { "type": "string" },
+            "content": { "type": "string" },
+            "word_count": { "type": "integer" },
+            "headings": { "type": "array", "items": { "type": "string" } },
+            "statistics": { "type": "array", "items": { "type": "string" } },
+            "claims": { "type": "array", "items": { "type": "string" } },
+            "external_links": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      max_tokens: 4000
+      model: gpt-4.1
+      return_images: false
+      return_related_questions: false
+      search_context_size: high
+      search_domain_filter: []
+      system_prompt: |
+        You are a content extraction agent. Your task is to:
+        1. Visit and read the provided blog URL
+        2. Extract the full content, title, and structure
+        3. Identify all statistics, numbers, and quantitative claims
+        4. Extract all factual assertions that need verification
+        5. List all external links/citations
+
+        Be thorough - extract EVERY claim and statistic for fact-checking.
+      temperature: 0.1
+      user_prompt: |
+        Fetch and parse this blog post: {{ input.body.blog_url }}
+
+        Extract:
+        1. Full title
+        2. Complete text content
+        3. All headings (H1, H2, H3)
+        4. Every statistic or number mentioned (e.g., "100ms", "40%", "$250k")
+        5. Every factual claim that can be verified
+        6. All external links cited
+    workflow_module_instance_id: fetch_and_parse_blog
+
+  # ============================================================
+  # STAGE 2: PERPLEXITY DEEP RESEARCH - FACT CHECKING
+  # ============================================================
+  - connections:
+      - connection_app_type: perplexity
+        connection_management_type: managed
+        connection_resource_id: stacksync_gtm_perplexity
+    description: null
+    error_handling_strategy: null
+    module_id: stacksync_ai-ai_prompt-2
+    module_options:
+      enable_error_handling: false
+    name: Perplexity Fact Check
+    properties:
+      enable_extended_thinking: false
+      enforce_json_output: true
+      enforced_json_schema: |
+        {
+          "type": "object",
+          "required": ["overall_accuracy_score", "fact_check_results"],
+          "properties": {
+            "overall_accuracy_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "sources_quality": { "type": "string", "enum": ["Excellent", "Good", "Adequate", "Poor", "Missing"] },
+            "fact_check_results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["claim", "verdict", "evidence", "severity"],
+                "properties": {
+                  "claim": { "type": "string" },
+                  "verdict": { "type": "string", "enum": ["Verified", "False", "Misleading", "Outdated", "Unverifiable", "Partially True"] },
+                  "evidence": { "type": "string" },
+                  "source_url": { "type": "string" },
+                  "severity": { "type": "string", "enum": ["Critical", "Major", "Minor", "Info"] },
+                  "correct_information": { "type": "string" }
+                }
+              }
+            },
+            "outdated_statistics": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "statistic": { "type": "string" },
+                  "blog_value": { "type": "string" },
+                  "current_value": { "type": "string" },
+                  "source": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      max_tokens: 4000
+      model: sonar-deep-research
+      return_images: false
+      return_related_questions: false
+      search_context_size: high
+      search_domain_filter: []
+      system_prompt: |
+        ### ROLE ###
+        You are the Chief Fact-Checking Agent for a world-class technical publication.
+
+        ### DOMAIN EXPERTISE: iPaaS & Data Infrastructure ###
+        Verify claims against these known industry benchmarks (2025/2026):
+
+        **API Limits:**
+        - NetSuite Tier 1: 15 concurrent requests (429 errors above this)
+        - Shopify Plus: 1,000 cost points/minute (GraphQL)
+        - Salesforce: 100,000 API calls/24hr (Enterprise)
+
+        **Latency Economics:**
+        - Amazon: 100ms latency = 1% revenue loss
+        - 40% cart abandonment after 3-second delays
+
+        **Pricing:**
+        - MuleSoft: ~$30k/vCore, typical $120k-$250k/year
+        - Fivetran: MAR-based with "bill shock" from bulk updates
+
+        **Operations:**
+        - Data engineers: 44-61% time on maintenance
+        - Average 67 data incidents/month
+        - Inventory distortion: $1.2-1.77 trillion annually
+
+        ### VERIFICATION PROTOCOL ###
+        1. Extract EVERY factual claim and statistic
+        2. Cross-reference with 2025/2026 sources
+        3. Flag outdated data (older than 2024)
+        4. Classify severity: Critical (wrong), Major (misleading), Minor (imprecise), Info (could be stronger)
+      temperature: 0.3
+      user_prompt: |
+        BLOG TITLE: {{ fetch_and_parse_blog.response.title }}
+
+        STATISTICS TO VERIFY:
+        {{ fetch_and_parse_blog.response.statistics | join(', ') }}
+
+        CLAIMS TO VERIFY:
+        {% for claim in fetch_and_parse_blog.response.claims %}
+        - {{ claim }}
+        {% endfor %}
+
+        FULL CONTENT:
+        {{ fetch_and_parse_blog.response.content }}
+
+        ---
+        Perform comprehensive fact-checking. Verify ALL claims against 2025/2026 sources.
+    workflow_module_instance_id: perplexity_fact_check
+
+  # ============================================================
+  # STAGE 3: TECHNICAL DEPTH ANALYZER
+  # ============================================================
+  - connections:
+      - connection_app_type: openai
+        connection_management_type: managed
+        connection_resource_id: openai_connection
+    description: null
+    error_handling_strategy: null
+    module_id: stacksync_ai-ai_prompt-1
+    module_options:
+      enable_error_handling: false
+    name: Technical Depth Analyzer
+    properties:
+      connection:
+        connection_app_type: openai
+        connection_management_type: managed
+        connection_name: OpenAI connection
+      enable_deep_research: false
+      enable_extended_thinking: false
+      enforce_json_output: true
+      enforced_json_schema: |
+        {
+          "type": "object",
+          "required": ["technical_depth_score", "technical_issues"],
+          "properties": {
+            "technical_depth_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "vp_engineering_credibility": { "type": "string", "enum": ["Would share", "Acceptable", "Skeptical", "Would dismiss"] },
+            "technical_issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["location", "issue_type", "description", "severity"],
+                "properties": {
+                  "location": { "type": "string" },
+                  "issue_type": { "type": "string", "enum": ["Oversimplification", "Technical Error", "Missing Context", "Vague Claim", "Architecture Flaw", "Security Concern"] },
+                  "description": { "type": "string" },
+                  "recommendation": { "type": "string" },
+                  "severity": { "type": "string", "enum": ["Critical", "Major", "Minor"] }
+                }
+              }
+            },
+            "missing_depth": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "topic": { "type": "string" },
+                  "what_should_be_covered": { "type": "string" }
+                }
+              }
+            },
+            "edp_opportunities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "edp_name": { "type": "string" },
+                  "insertion_point": { "type": "string" },
+                  "suggested_text": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      max_tokens: 3000
+      model: gpt-4.1
+      return_images: false
+      return_related_questions: false
+      search_context_size: medium
+      search_domain_filter: []
+      system_prompt: |
+        ### ROLE ###
+        You are a Principal Solutions Architect with 15+ years in enterprise data infrastructure. You review content with the skepticism of someone who has seen marketing fluff destroy engineering credibility.
+
+        ### EVALUATION LENS: VP OF ENGINEERING ###
+        Evaluate as a VP Eng at a mid-market company ($50M-$500M revenue) would:
+        - Can spot hand-wavy architecture instantly
+        - Wants specific numbers, not "blazing fast"
+        - Cares about: API limits, failure modes, operational burden, TCO
+
+        ### SCORING CRITERIA ###
+        **90-100 (World-Class):** Specific API limits, failure modes, benchmarks with methodology
+        **70-89 (Strong):** Technical claims are specific and verifiable
+        **50-69 (Adequate):** Correct at surface but lacks depth
+        **0-49 (Shallow):** Marketing language dominates, vague claims
+
+        ### STACKSYNC EDPs TO SUGGEST ###
+        1. NetSuite Concurrency Trap: 15-thread limit, 429 errors
+        2. 100ms Revenue Cliff: Amazon's latency = revenue loss
+        3. Maintenance Tax: 44-61% of data engineer time
+        4. MuleSoft vCore Tax: $250k/year for 4 vCores
+        5. MAR Volatility: Fivetran's unpredictable billing
+        6. Inventory Distortion: $1.2T annual cost
+      temperature: 0.2
+      user_prompt: |
+        BLOG TITLE: {{ fetch_and_parse_blog.response.title }}
+
+        HEADINGS:
+        {{ fetch_and_parse_blog.response.headings | join('\n') }}
+
+        CONTENT:
+        {{ fetch_and_parse_blog.response.content }}
+
+        ---
+        Analyze technical depth. Evaluate as a skeptical VP of Engineering would.
+    workflow_module_instance_id: technical_depth_analyzer
+
+  # ============================================================
+  # STAGE 4: WRITING QUALITY CHECKER
+  # ============================================================
+  - connections:
+      - connection_app_type: openai
+        connection_management_type: managed
+        connection_resource_id: openai_connection
+    description: null
+    error_handling_strategy: null
+    module_id: stacksync_ai-ai_prompt-1
+    module_options:
+      enable_error_handling: false
+    name: Writing Quality Checker
+    properties:
+      connection:
+        connection_app_type: openai
+        connection_management_type: managed
+        connection_name: OpenAI connection
+      enable_deep_research: false
+      enable_extended_thinking: false
+      enforce_json_output: true
+      enforced_json_schema: |
+        {
+          "type": "object",
+          "required": ["writing_score", "issues"],
+          "properties": {
+            "writing_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "issues": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["type", "original", "suggestion", "severity"],
+                "properties": {
+                  "type": { "type": "string", "enum": ["Grammar", "Spelling", "Punctuation", "Style", "Clarity", "Redundancy", "Jargon", "Tone", "Flow"] },
+                  "location": { "type": "string" },
+                  "original": { "type": "string" },
+                  "suggestion": { "type": "string" },
+                  "explanation": { "type": "string" },
+                  "severity": { "type": "string", "enum": ["Critical", "Major", "Minor", "Suggestion"] }
+                }
+              }
+            },
+            "structure_assessment": {
+              "type": "object",
+              "properties": {
+                "intro_effectiveness": { "type": "string" },
+                "logical_flow": { "type": "string", "enum": ["Excellent", "Good", "Adequate", "Needs Work", "Poor"] },
+                "conclusion_strength": { "type": "string" }
+              }
+            },
+            "tone_analysis": {
+              "type": "object",
+              "properties": {
+                "detected_tone": { "type": "string" },
+                "appropriate_for_b2b": { "type": "boolean" },
+                "confidence_level": { "type": "string", "enum": ["Authoritative", "Balanced", "Uncertain", "Salesy"] }
+              }
+            }
+          }
+        }
+      max_tokens: 3000
+      model: gpt-4.1
+      return_images: false
+      return_related_questions: false
+      search_context_size: medium
+      search_domain_filter: []
+      system_prompt: |
+        ### ROLE ###
+        You are an Executive Editor for a world-class B2B technology publication. Zero tolerance for errors.
+
+        ### QUALITY STANDARD ###
+        - ZERO grammatical errors
+        - ZERO spelling mistakes
+        - ZERO punctuation errors
+        - Clear, confident prose without hedging
+        - Technical precision without unnecessary jargon
+
+        ### FLAG THESE ISSUES ###
+        **Critical:** Grammar errors, spelling, incorrect punctuation, nonsensical sentences
+        **Major:** Unclear antecedents, run-on sentences, paragraph walls, tonal inconsistencies
+        **Minor:** Suboptimal word choice, awkward phrasing, redundant phrases
+        **Suggestion:** Ways to make sentences punchier, better transitions
+
+        ### B2B TONE ###
+        - Authoritative but not arrogant
+        - Technical but accessible
+        - Avoid: "revolutionary", "game-changing", "seamless" without proof
+      temperature: 0.1
+      user_prompt: |
+        BLOG TITLE: {{ fetch_and_parse_blog.response.title }}
+        WORD COUNT: {{ fetch_and_parse_blog.response.word_count }}
+
+        CONTENT:
+        {{ fetch_and_parse_blog.response.content }}
+
+        ---
+        Perform comprehensive writing quality analysis. Flag EVERY error. This must be world-class.
+    workflow_module_instance_id: writing_quality_checker
+
+  # ============================================================
+  # STAGE 5: PERSONA ALIGNMENT ANALYZER
+  # ============================================================
+  - connections:
+      - connection_app_type: openai
+        connection_management_type: managed
+        connection_resource_id: openai_connection
+    description: null
+    error_handling_strategy: null
+    module_id: stacksync_ai-ai_prompt-1
+    module_options:
+      enable_error_handling: false
+    name: Persona Alignment Analyzer
+    properties:
+      connection:
+        connection_app_type: openai
+        connection_management_type: managed
+        connection_name: OpenAI connection
+      enable_deep_research: false
+      enable_extended_thinking: false
+      enforce_json_output: true
+      enforced_json_schema: |
+        {
+          "type": "object",
+          "required": ["overall_icp_alignment", "persona_scores"],
+          "properties": {
+            "overall_icp_alignment": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "persona_scores": {
+              "type": "object",
+              "properties": {
+                "vp_engineering": {
+                  "type": "object",
+                  "properties": {
+                    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "would_share": { "type": "boolean" },
+                    "concerns_addressed": { "type": "array", "items": { "type": "string" } },
+                    "concerns_missing": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "ops_director": {
+                  "type": "object",
+                  "properties": {
+                    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "would_share": { "type": "boolean" },
+                    "concerns_addressed": { "type": "array", "items": { "type": "string" } },
+                    "concerns_missing": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "cfo": {
+                  "type": "object",
+                  "properties": {
+                    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+                    "would_share": { "type": "boolean" },
+                    "roi_clarity": { "type": "string", "enum": ["Clear", "Implied", "Missing"] },
+                    "concerns_addressed": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            },
+            "messaging_gaps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "gap": { "type": "string" },
+                  "target_persona": { "type": "string" },
+                  "suggested_addition": { "type": "string" },
+                  "impact": { "type": "string", "enum": ["High", "Medium", "Low"] }
+                }
+              }
+            }
+          }
+        }
+      max_tokens: 3000
+      model: gpt-4.1
+      return_images: false
+      return_related_questions: false
+      search_context_size: medium
+      search_domain_filter: []
+      system_prompt: |
+        ### ROLE ###
+        You are a B2B Marketing Strategist specializing in technical buyer personas.
+
+        ### TARGET PERSONAS ###
+
+        **1. VP of Engineering (Mid-Market BFSI/Tech)**
+        - PAIN: 429 errors, 50-60% maintenance time, $250k MuleSoft renewals, $300k+/hr downtime
+        - WANTS: Specific technical details, benchmarks, security certs, migration paths
+        - RESONATES: "Bypass 15-thread limit", "Eliminate MAR tax", "Free engineers from maintenance"
+
+        **2. Operations Director (Mid-Market Retail)**
+        - PAIN: 15-min batch windows, oversells, Black Friday cancellations, Amazon chargebacks
+        - WANTS: Real-world examples, quantified impact, easy to understand
+        - RESONATES: "Sub-second sync", "Predictable pricing", "No cancelled orders"
+
+        **3. CFO (Mid-Market Tech/Services)**
+        - PAIN: $250k MuleSoft, 2-3x Fivetran spikes, hidden SuiteCloud+ costs, 50% salary waste
+        - WANTS: Clear ROI (Year 1, Year 3), TCO comparison, predictable billing
+        - RESONATES: "50% TCO reduction", "No MAR tax", "2-3 FTE equivalent value"
+
+        ### EVALUATE ###
+        1. Would each persona share this content?
+        2. Are their specific pain points addressed?
+        3. Is language appropriate for each persona's technical level?
+      temperature: 0.2
+      user_prompt: |
+        BLOG TITLE: {{ fetch_and_parse_blog.response.title }}
+
+        CONTENT:
+        {{ fetch_and_parse_blog.response.content }}
+
+        ---
+        Analyze how well this content resonates with each target persona.
+    workflow_module_instance_id: persona_alignment_analyzer
+
+  # ============================================================
+  # STAGE 6: FINAL JSON OUTPUT
+  # ============================================================
+  - connections: []
+    description: null
+    error_handling_strategy: null
+    module_id: system-data_aggregator-1
+    module_options:
+      enable_error_handling: false
+    name: Final Audit Output
+    properties:
+      data: >-
+        {
+          "blog_url": "{{ input.body.blog_url }}",
+          "blog_title": "{{ fetch_and_parse_blog.response.title }}",
+          "word_count": {{ fetch_and_parse_blog.response.word_count }},
+          "scores": {
+            "factual_accuracy": {{ perplexity_fact_check.response.overall_accuracy_score }},
+            "technical_depth": {{ technical_depth_analyzer.response.technical_depth_score }},
+            "writing_quality": {{ writing_quality_checker.response.writing_score }},
+            "persona_alignment": {{ persona_alignment_analyzer.response.overall_icp_alignment }}
+          },
+          "fact_check": {
+            "sources_quality": "{{ perplexity_fact_check.response.sources_quality }}",
+            "results": {{ perplexity_fact_check.response.fact_check_results | tojson }},
+            "outdated_statistics": {{ perplexity_fact_check.response.outdated_statistics | tojson }}
+          },
+          "technical_analysis": {
+            "vp_credibility": "{{ technical_depth_analyzer.response.vp_engineering_credibility }}",
+            "issues": {{ technical_depth_analyzer.response.technical_issues | tojson }},
+            "missing_depth": {{ technical_depth_analyzer.response.missing_depth | tojson }},
+            "edp_opportunities": {{ technical_depth_analyzer.response.edp_opportunities | tojson }}
+          },
+          "writing_analysis": {
+            "issues": {{ writing_quality_checker.response.issues | tojson }},
+            "structure": {{ writing_quality_checker.response.structure_assessment | tojson }},
+            "tone": {{ writing_quality_checker.response.tone_analysis | tojson }}
+          },
+          "persona_alignment": {
+            "vp_engineering": {{ persona_alignment_analyzer.response.persona_scores.vp_engineering | tojson }},
+            "ops_director": {{ persona_alignment_analyzer.response.persona_scores.ops_director | tojson }},
+            "cfo": {{ persona_alignment_analyzer.response.persona_scores.cfo | tojson }},
+            "messaging_gaps": {{ persona_alignment_analyzer.response.messaging_gaps | tojson }}
+          }
+        }
+    workflow_module_instance_id: final_json_output
+
+return_workflow_module_instance_ids:
+  - final_json_output
+
+workflow_execution_timeout: 600
+workflow_module_execution_timeout: 300
